@@ -8,6 +8,8 @@ from numpy import inf
 
 import logging
 
+from modules.monitor import Monitor
+
 
 class BaseTrainer(object):
     def __init__(self, model, criterion, metric_ftns, optimizer, args):
@@ -16,7 +18,7 @@ class BaseTrainer(object):
         logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                             datefmt='%m/%d/%Y %H:%M:%S', level=logging.INFO)
         self.logger = logging.getLogger(__name__)
-        
+
         # setup GPU device if available, move model into configured device
         self.device, device_ids = self._prepare_device(args.n_gpu)
         self.model = model.to(self.device)
@@ -50,6 +52,15 @@ class BaseTrainer(object):
         self.best_recorder = {'val': {self.mnt_metric: self.mnt_best},
                               'test': {self.mnt_metric_test: self.mnt_best}}
 
+        # 初始化 Monitor（实验记录与可视化）
+        self.monitor = Monitor(
+            record_dir=self.checkpoint_dir,
+            monitor_metric=args.monitor_metric,
+            monitor_mode=args.monitor_mode,
+        )
+        self.monitor.start_training()
+        self.monitor.log_config(vars(args))
+
     @abstractmethod
     def _train_epoch(self, epoch, model_name):
         raise NotImplementedError
@@ -57,6 +68,7 @@ class BaseTrainer(object):
     def train(self):
         not_improved_count = 0
         for epoch in range(self.start_epoch, self.epochs + 1):
+            self.monitor.start_epoch(epoch)
             result = self._train_epoch(epoch, self.args.model_name)
 
             # save logged informations into log dict
@@ -68,14 +80,24 @@ class BaseTrainer(object):
             for key, value in log.items():
                 self.logger.info('\t{:15s}: {}'.format(str(key), value))
 
+            # 提取 train/val/test 指标用于 Monitor
+            train_metrics = {'train_loss': log.get('train_loss', 0)}
+            val_metrics = {k.replace('val_', ''): v for k, v in log.items() if k.startswith('val_')}
+            test_metrics = {k.replace('test_', ''): v for k, v in log.items() if k.startswith('test_')}
+            self.monitor.end_epoch(epoch, train_metrics=train_metrics,
+                                   val_metrics=val_metrics, test_metrics=test_metrics)
+
+            # 保存 epoch 指标到 CSV
+            self._save_epoch_metrics_to_csv(log)
+
             # evaluate model performance according to configured metric, save best checkpoint as model_best
             best = False
             if self.mnt_mode != 'off':
-                try:
-                    # check whether model performance improved or not, according to specified metric(mnt_metric)
+                # check whether model performance improved or not, according to specified metric(mnt_metric)
+                if self.mnt_metric in log:
                     improved = (self.mnt_mode == 'min' and log[self.mnt_metric] <= self.mnt_best) or \
                                (self.mnt_mode == 'max' and log[self.mnt_metric] >= self.mnt_best)
-                except KeyError:
+                else:
                     self.logger.warning(
                         "Warning: Metric '{}' is not found. " "Model performance monitoring is disabled.".format(
                             self.mnt_metric))
@@ -98,6 +120,24 @@ class BaseTrainer(object):
                 self._save_checkpoint(epoch, save_best=best)
         self._print_best()
         self._print_best_to_file()
+        self.monitor.end_training()
+
+    def _save_epoch_metrics_to_csv(self, log):
+        """保存每个 epoch 的指标到 epoch_metrics.csv"""
+        metrics_path = os.path.join(self.checkpoint_dir, 'epoch_metrics.csv')
+        row_data = {'epoch': log.get('epoch', 0)}
+        for key in log.keys():
+            if key.startswith('val_') or key.startswith('test_'):
+                row_data[key] = log[key]
+        new_row = pd.DataFrame([row_data])
+        if os.path.exists(metrics_path):
+            existing = pd.read_csv(metrics_path)
+            existing = existing[existing['epoch'] != row_data['epoch']]
+            combined = pd.concat([existing, new_row], ignore_index=True)
+        else:
+            combined = new_row
+        combined = combined.sort_values('epoch').reset_index(drop=True)
+        combined.to_csv(metrics_path, index=False)
 
     def _print_best_to_file(self):
         crt_time = time.asctime(time.localtime(time.time()))
@@ -119,7 +159,7 @@ class BaseTrainer(object):
         record_table = pd.concat([record_table, pd.DataFrame([self.best_recorder['val']])], ignore_index=True)
         record_table = pd.concat([record_table, pd.DataFrame([self.best_recorder['test']])], ignore_index=True)
         record_table.to_csv(record_path, index=False)
-    
+
     def _prepare_device(self, n_gpu_use):
         n_gpu = torch.cuda.device_count()
         if n_gpu_use > 0 and n_gpu == 0:
@@ -149,7 +189,7 @@ class BaseTrainer(object):
             best_path = os.path.join(self.checkpoint_dir, 'model_best.pth')
             torch.save(state, best_path)
             self.logger.info("Saving current best: model_best.pth ...")
-    
+
     def _resume_checkpoint(self, resume_path):
         resume_path = str(resume_path)
         self.logger.info("Loading checkpoint: {} ...".format(resume_path))
@@ -174,7 +214,7 @@ class BaseTrainer(object):
                             self.mnt_metric_test])
         if improved_test:
             self.best_recorder['test'].update(log)
-    
+
     def _print_best(self):
         self.logger.info('Best results (w.r.t {}) in validation set:'.format(self.args.monitor_metric))
         for key, value in self.best_recorder['val'].items():
@@ -198,7 +238,7 @@ class Trainer(BaseTrainer):
     def _train_epoch(self, epoch, model_name):
 
         self.logger.info('[{}/{}] Start to train in the training set.'.format(epoch, self.epochs))
-        
+
         train_loss = 0
         self.model.train()
         for batch_idx, (images_id, images, reports_ids, reports_masks) in enumerate(self.train_dataloader):
@@ -211,14 +251,14 @@ class Trainer(BaseTrainer):
             loss.backward()
             torch.nn.utils.clip_grad_value_(self.model.parameters(), 0.1)
             self.optimizer.step()
-            
+
             if batch_idx % self.args.log_period == 0:
                 self.logger.info('[{}/{}] Step: {}/{}, Training Loss: {:.5f}.'
                                  .format(epoch, self.epochs, batch_idx, len(self.train_dataloader),
                                          train_loss / (batch_idx + 1)))
-            
+
         log = {'train_loss': train_loss / len(self.train_dataloader)}
-        
+
         self.logger.info('[{}/{}] Start to evaluate in the validation set.'.format(epoch, self.epochs))
         self.model.eval()
         with torch.no_grad():

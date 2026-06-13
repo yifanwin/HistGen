@@ -21,8 +21,9 @@ def parse_agrs():
     parser = argparse.ArgumentParser()
 
     # Data input settings
-    parser.add_argument('--image_dir', type=str, default='data/iu_xray/images/', help='the path to the directory containing the data.')
-    parser.add_argument('--ann_path', type=str, default='data/iu_xray/annotation.json', help='the path to the directory containing the data.')
+    parser.add_argument('--image_dir', type=str, default='datas/TCGA-BRCA-feature-uni/pt_files', help='the path to the directory containing the feature .pt files.')
+    parser.add_argument('--ann_path', type=str, default='datas/WSICAP_REPORT/TCGA-BRCA', help='the path to the directory containing annotation subdirectories.')
+    parser.add_argument('--split_path', type=str, default='datas/WSICAP_REPORT/splits_0.csv', help='the path to the splits_0.csv file.')
 
     # Data loader settings
     parser.add_argument('--dataset_name', type=str, default='wsi_report', choices=['iu_xray', 'mimic_cxr', 'wsi_report'], help='the dataset to be used.')
@@ -44,8 +45,8 @@ def parse_agrs():
     parser.add_argument('--num_layers', type=int, default=3, help='the number of layers of Transformer.')
     parser.add_argument('--dropout', type=float, default=0.1, help='the dropout rate of Transformer.')
     parser.add_argument('--logit_layers', type=int, default=1, help='the number of the logit layer.')
-    parser.add_argument('--bos_idx', type=int, default=0, help='the index of <bos>.')
-    parser.add_argument('--eos_idx', type=int, default=0, help='the index of <eos>.')
+    parser.add_argument('--bos_idx', type=int, default=1, help='the index of <bos>.')
+    parser.add_argument('--eos_idx', type=int, default=2, help='the index of <eos>.')
     parser.add_argument('--pad_idx', type=int, default=0, help='the index of <pad>.')
     parser.add_argument('--use_bn', type=int, default=0, help='whether to use batch normalization.')
     parser.add_argument('--drop_prob_lm', type=float, default=0.5, help='the dropout rate of the output layer.')
@@ -56,6 +57,13 @@ def parse_agrs():
     # for Local-global hierachical visual encoder
     parser.add_argument("--region_size", type=int, default=256, help="the size of the region for region transformer.")
     parser.add_argument("--prototype_num", type=int, default=512, help="the number of visual prototypes for cross-modal interaction")
+    # for token selection (baseline models: r2gen, r2gen_cmn, m2transformer, etc.)
+    parser.add_argument('--token_select', type=str, default='uniform_sampling', choices=['cross_attention', 'uniform_sampling', 'kmeans'], help='token selection method for baseline models.')
+    parser.add_argument('--token_num', type=int, default=256, help='the number of selected tokens for baseline models.')
+    # for Relational Memory (R2Gen)
+    parser.add_argument('--rm_num_slots', type=int, default=3, help='the number of relational memory slots.')
+    parser.add_argument('--rm_num_heads', type=int, default=8, help='the number of relational memory heads.')
+    parser.add_argument('--rm_d_model', type=int, default=512, help='the dimension of relational memory.')
 
     # Sample related
     parser.add_argument('--sample_method', type=str, default='beam_search', help='the sample methods to sample a report.')

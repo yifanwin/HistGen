@@ -10,7 +10,11 @@ class HistGenModel(nn.Module):
         self.args = args
         self.tokenizer = tokenizer
         self.encoder_decoder = BaseHistGen(args, tokenizer)
-        self.wsi_mapping = torch.nn.Linear(768, self.args.d_vf) if "ctranspath" in args.image_dir else torch.nn.Linear(1024, self.args.d_vf)
+        # UNI 和 DINOv2 特征均为 1024 维，CTransPath 为 768 维
+        if "ctranspath" in args.image_dir or "ctranspath" in str(getattr(args, 'feature_dim', '')):
+            self.wsi_mapping = torch.nn.Linear(768, self.args.d_vf)
+        else:
+            self.wsi_mapping = torch.nn.Linear(1024, self.args.d_vf)
         self.forward = self.forward_pathology
         self.visual_extractor = VisualExtractor(args)
 

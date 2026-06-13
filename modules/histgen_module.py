@@ -620,7 +620,7 @@ class BaseHistGen(AttModel):
     def _save_attns(self, start=False):
         if start:
             self.attention_weights = []
-        self.attention_weights.append([layer.src_attn.attn.cpu().numpy() for layer in self.model.decoder.layers])
+        self.attention_weights.append([layer.src_attn.attn.detach().cpu().numpy() for layer in self.model.decoder.layers])
 
     def core(self, it, fc_feats_ph, att_feats_ph, memory, state, mask):
         if len(state) == 0:

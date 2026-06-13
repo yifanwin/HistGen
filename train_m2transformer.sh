@@ -1,31 +1,28 @@
-model='histgen'
+#!/bin/bash
+# M2Transformer 训练脚本 (Baseline)
+model='m2transformer'
 max_length=100
-epochs=40
-region_size=96
-prototype_num=512
+epochs=120
 
+export CUDA_VISIBLE_DEVICES=2
 python main_train_AllinOne.py \
     --image_dir datas/TCGA-BRCA-feature-uni/pt_files \
     --ann_path datas/WSICAP_REPORT/TCGA-BRCA \
     --split_path datas/WSICAP_REPORT/splits_0.csv \
     --dataset_name wsi_report \
     --model_name $model \
+    --token_select uniform_sampling \
+    --token_num 256 \
     --max_seq_length $max_length \
-    --num_layers 3 \
     --threshold 10 \
     --batch_size 1 \
     --epochs $epochs \
     --lr_ve 1e-4 \
-    --lr_ed 1e-4 \
-    --step_size 3 \
-    --topk 512 \
-    --cmm_size 2048 \
-    --cmm_dim 512 \
-    --region_size $region_size \
-    --prototype_num $prototype_num \
-    --save_dir /path/to/storage \
-    --step_size 1 \
+    --lr_ed 1e-5 \
+    --step_size 20 \
     --gamma 0.8 \
+    --topk 32 \
+    --save_dir results/m2transformer_uni \
     --seed 456789 \
     --log_period 1000 \
     --beam_size 3

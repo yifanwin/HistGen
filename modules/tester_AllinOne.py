@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 
 from modules.utils import generate_heatmap
+from modules.monitor import Monitor
 from tqdm import tqdm
 import logging
 
@@ -33,6 +34,14 @@ class BaseTester(object):
             os.makedirs(self.save_dir)
 
         self._load_checkpoint(args.load)
+
+        # 初始化 Monitor（测试记录）
+        self.monitor = Monitor(
+            record_dir=self.save_dir,
+            monitor_metric=args.monitor_metric,
+            monitor_mode=args.monitor_mode,
+        )
+        self.monitor.log_config(vars(args))
 
     @abstractmethod
     def test(self):
@@ -89,6 +98,9 @@ class Tester(BaseTester):
                                         {i: [re] for i, re in enumerate(test_res)})
             log.update(**{'test_' + k: v for k, v in test_met.items()})
             print(log)
+
+            # 记录测试结果到 Monitor
+            self.monitor.log_test_metrics(test_met)
 
             # Convert to pandas DataFrame
             test_res_df = pd.DataFrame(test_res, columns=['Generated Reports'])

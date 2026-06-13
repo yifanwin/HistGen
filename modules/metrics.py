@@ -1,8 +1,11 @@
+import inspect
 from sklearn.metrics import roc_auc_score, f1_score, recall_score, precision_score
 
 from pycocoevalcap.bleu.bleu import Bleu
 from pycocoevalcap.meteor import Meteor
 from pycocoevalcap.rouge import Rouge
+from pycocoevalcap.cider.cider import Cider
+from modules.fact import compute_fact_score
 
 
 def compute_scores(gts, res):
@@ -18,20 +21,27 @@ def compute_scores(gts, res):
     scorers = [
         (Bleu(4), ["BLEU_1", "BLEU_2", "BLEU_3", "BLEU_4"]),
         (Meteor(), "METEOR"),
-        (Rouge(), "ROUGE_L")
+        (Rouge(), "ROUGE_L"),
+        (Cider(), "CIDEr"),
     ]
     eval_res = {}
     # Compute score for each metric
     for scorer, method in scorers:
-        try:
-            score, scores = scorer.compute_score(gts, res, verbose=0)
-        except TypeError:
-            score, scores = scorer.compute_score(gts, res)
+        # 部分 scorer (如 Bleu) 支持 verbose 参数，其他不支持
+        sig = inspect.signature(scorer.compute_score)
+        if 'verbose' in sig.parameters:
+            score, _ = scorer.compute_score(gts, res, verbose=0)
+        else:
+            score, _ = scorer.compute_score(gts, res)
         if type(method) == list:
             for sc, m in zip(score, method):
                 eval_res[m] = sc
         else:
             eval_res[method] = score
+
+    # FACT 实体匹配指标
+    eval_res['FACT'] = compute_fact_score(res, gts)
+
     return eval_res
 
 

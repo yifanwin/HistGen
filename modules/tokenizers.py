@@ -1,6 +1,45 @@
 import json
+import os
 import re
+import torch
+import pandas as pd
 from collections import Counter
+from typing import List, Optional
+
+
+def _load_reports_from_filesystem(ann_path, split_path, split='train'):
+    """从文件系统读取报告文本和split信息，替代从JSON加载。
+    返回 {'train': [{'report': ...}, ...], 'val': [...], 'test': [...]}
+    """
+    result = {'train': [], 'val': [], 'test': []}
+    if not os.path.isdir(ann_path):
+        return result
+    root = ann_path
+
+    for split_name in ['train', 'val', 'test']:
+        split_data = pd.read_csv(split_path).loc[:, split_name].dropna()
+        cases = {}
+        for idx in range(len(split_data)):
+            case_name = split_data.iloc[idx]
+            case_id = '-'.join(case_name.split('-')[:3])
+            cases[case_id] = case_name
+
+        for dir in os.listdir(root):
+            dir_path = os.path.join(root, dir)
+            if not os.path.isdir(dir_path):
+                continue
+            if dir not in cases:
+                continue
+            file_name = os.path.join(root, dir, 'annotation')
+            if not os.path.exists(file_name):
+                continue
+            raw = open(file_name, 'r').read()
+            anno = raw.strip()
+            if anno.startswith('"') and anno.endswith('"'):
+                anno = anno[1:-1]
+            result[split_name].append({'id': dir, 'report': anno})
+
+    return result
 
 
 class Tokenizer(object):
@@ -14,7 +53,11 @@ class Tokenizer(object):
             self.clean_report = self.clean_report_pathology
         else:
             self.clean_report = self.clean_report_mimic_cxr
-        self.ann = json.loads(open(self.ann_path, 'r').read())
+        # 从文件系统加载报告（兼容新的目录结构）
+        if os.path.isdir(self.ann_path):
+            self.ann = _load_reports_from_filesystem(self.ann_path, args.split_path)
+        else:
+            self.ann = json.loads(open(self.ann_path, 'r').read())
         self.token2idx, self.idx2token = self.create_vocabulary()
 
     def create_vocabulary(self):
@@ -26,12 +69,25 @@ class Tokenizer(object):
                 total_tokens.append(token)
 
         counter = Counter(total_tokens)
-        vocab = [k for k, v in counter.items() if v >= self.threshold] + ['<unk>']
+        vocab = [k for k, v in counter.items() if v >= self.threshold]
         vocab.sort()
+
+        # 特殊 token: 固定位置，与其他 tokenizer 一致
+        special_tokens = ['<pad>', '<bos>', '<eos>', '<unk>']
+        vocab = special_tokens + vocab
+
         token2idx, idx2token = {}, {}
         for idx, token in enumerate(vocab):
-            token2idx[token] = idx + 1
-            idx2token[idx + 1] = token
+            token2idx[token] = idx
+            idx2token[idx] = token
+
+        self.bos_token = '<bos>'
+        self.eos_token = '<eos>'
+        self.pad_token = '<pad>'
+        self.unk_token = '<unk>'
+        self.bos_idx = token2idx['<bos>']
+        self.eos_idx = token2idx['<eos>']
+        self.pad_idx = token2idx['<pad>']
         return token2idx, idx2token
 
     def clean_report_iu_xray(self, report):
@@ -91,18 +147,18 @@ class Tokenizer(object):
         ids = []
         for token in tokens:
             ids.append(self.get_id_by_token(token))
-        ids = [0] + ids + [0]
+        ids = [self.bos_idx] + ids + [self.eos_idx]
         return ids
 
     def decode(self, ids):
         txt = ''
         for i, idx in enumerate(ids):
-            if idx > 0:
-                if i >= 1:
+            if idx == self.eos_idx or idx == self.pad_idx:
+                break
+            if idx != self.bos_idx:
+                if i >= 1 and ids[i-1] != self.bos_idx:
                     txt += ' '
                 txt += self.idx2token[idx]
-            else:
-                break
         return txt
 
     def decode_batch(self, ids_batch):
@@ -281,7 +337,11 @@ class MedicalReportTokenizer(object):
         self.clean_report = self.clean_report_map.get(self.dataset_name, self.clean_report_mimic_cxr)
         
         self.preserve_case = (self.dataset_name == 'wsi_report')
-        self.ann = json.loads(open(self.ann_path, 'r').read())
+        # 从文件系统加载报告（兼容新的目录结构）
+        if os.path.isdir(self.ann_path):
+            self.ann = _load_reports_from_filesystem(self.ann_path, args.split_path)
+        else:
+            self.ann = json.loads(open(self.ann_path, 'r').read())
         self.token2idx, self.idx2token = self.create_vocabulary()
 
     def create_vocabulary(self):

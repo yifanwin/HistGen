@@ -1,12 +1,13 @@
-model='histgen'
+model='histgen' 
 max_length=100
 epochs=40
 region_size=96
 prototype_num=512
 
 python main_test_AllinOne.py \
-    --image_dir /path/to/feature \
-    --ann_path /path/to/json \
+    --image_dir datas/TCGA-BRCA-feature-uni/pt_files \
+    --ann_path datas/WSICAP_REPORT/TCGA-BRCA \
+    --split_path datas/WSICAP_REPORT/splits_0.csv \
     --dataset_name wsi_report \
     --model_name $model \
     --max_seq_length $max_length \
